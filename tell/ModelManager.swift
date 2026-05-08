@@ -72,8 +72,15 @@ final class ModelManager {
     private static let defaultsKey = "downloadedWhisperKitModels"
 
     var downloadedModels: [String] = []
+    var availableModelIDs: Set<String> = Set(curatedModels)
     var isDownloading = false
     var downloadProgress: [String: Double] = [:]
+
+    func refreshAvailable() async {
+        if let ids = try? await WhisperKit.fetchAvailableModels() {
+            availableModelIDs = Set(ids)
+        }
+    }
 
     func refreshDownloaded() {
         let tracked = UserDefaults.standard.stringArray(forKey: Self.defaultsKey) ?? []

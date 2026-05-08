@@ -125,7 +125,10 @@ private struct ModelSettingsView: View {
             }
             .formStyle(.grouped)
         }
-        .onAppear { modelManager.refreshDownloaded() }
+        .onAppear {
+            modelManager.refreshDownloaded()
+            Task { await modelManager.refreshAvailable() }
+        }
     }
 
     private var filterBar: some View {
@@ -171,6 +174,7 @@ private struct ModelSettingsView: View {
 
     private func filtered(_ models: [WhisperModelInfo]) -> [WhisperModelInfo] {
         models.filter { m in
+            guard modelManager.availableModelIDs.contains(m.repoID) else { return false }
             let matchSearch = search.isEmpty || m.displayName.localizedCaseInsensitiveContains(search)
             let matchLang: Bool = switch languageFilter {
                 case .all: true

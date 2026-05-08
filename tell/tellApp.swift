@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             Task {
                 let url = await self.recorder.stop()
+                self.overlay.showProcessing()
                 do {
                     let text = try await self.transcription.transcribe(url: url)
                     self.pasteService.paste(text: text)
