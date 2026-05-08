@@ -10,7 +10,6 @@ struct tellApp: App {
         WindowGroup(id: "settings") {
             SettingsView(settings: appDelegate.settings)
         }
-        .windowResizability(.contentSize)
 
         MenuBarExtra("tell", systemImage: "mic") {
             MenuBarView(
@@ -99,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source = .huggingFace(String(src.dropFirst(3)))
         } else if src.hasPrefix("local:") {
             source = .localFile(URL(fileURLWithPath: String(src.dropFirst(6))))
+        } else if src.hasPrefix("server:"), let url = URL(string: String(src.dropFirst(7))) {
+            source = .localServer(url)
         } else {
             source = .huggingFace(src)
         }

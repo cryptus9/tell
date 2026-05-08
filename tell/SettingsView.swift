@@ -47,7 +47,30 @@ struct SettingsView: View {
             case .permissions:  PermissionsSettingsView()
             }
         }
-        .frame(width: 580, height: 400)
+        .frame(minWidth: 560, minHeight: 300)
+    }
+}
+
+// MARK: - Shared
+
+private struct MetricDots: View {
+    let label: String
+    let score: Int
+    let total: Int = 3
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 2) {
+                ForEach(1...total, id: \.self) { i in
+                    Circle()
+                        .frame(width: 6, height: 6)
+                        .foregroundStyle(i <= score ? Color.accentColor : Color.secondary.opacity(0.3))
+                }
+            }
+        }
     }
 }
 
@@ -56,81 +79,148 @@ struct SettingsView: View {
 private struct ModelSettingsView: View {
     var settings: AppSettings
     @State private var modelManager = ModelManager()
-    @State private var customRepoID = ""
+    @State private var serverURLText = ""
+    @State private var search = ""
+    @State private var languageFilter: LanguageFilter = .all
+    @State private var sizeFilter: ModelSizeCategory? = nil
+    @State private var speedFilter: ModelSpeed? = nil
+
+    enum LanguageFilter: String, CaseIterable {
+        case all = "All", multilingual = "Multilingual", english = "English"
+    }
 
     var body: some View {
-        Form {
-            Section {
-                ForEach(ModelManager.curatedModels, id: \.self) { repoID in
-                    curatedModelRow(repoID: repoID)
-                }
-            }
-
-            Section {
-                HStack {
-                    TextField("Custom HF repo (e.g. distil-whisper/distil-large-v3)", text: $customRepoID)
-                    Button("Download") {
-                        let repo = customRepoID
-                        settings.modelSource = "hf:\(repo)"
-                        Task { try? await modelManager.download(repoID: repo) }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(customRepoID.isEmpty || modelManager.isDownloading)
-                }
-
-                Button("Load from file…") {
-                    if let url = modelManager.openLocalFile() {
-                        settings.modelSource = "local:\(url.path)"
+        VStack(spacing: 0) {
+            filterBar
+            Divider()
+            Form {
+                let openAI = filtered(ModelManager.openAIModels)
+                let distil  = filtered(ModelManager.distilModels)
+                if !openAI.isEmpty {
+                    Section("OpenAI Whisper") {
+                        ForEach(openAI) { modelRow($0) }
                     }
                 }
+                if !distil.isEmpty {
+                    Section("Distil-Whisper") {
+                        ForEach(distil) { modelRow($0) }
+                    }
+                }
+                if openAI.isEmpty && distil.isEmpty {
+                    Section { Text("No models match filters").foregroundStyle(.secondary) }
+                }
+                Section("Local Server") {
+                    HStack {
+                        TextField("http://localhost:8000", text: $serverURLText)
+                        Button("Use") {
+                            settings.modelSource = "server:\(serverURLText)"
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(URL(string: serverURLText) == nil || serverURLText.isEmpty)
+                    }
+                    Text("OpenAI-compatible /v1/audio/transcriptions endpoint. Works with faster-whisper-server, LocalAI, and others.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
         .onAppear { modelManager.refreshDownloaded() }
     }
 
-    private static let modelSizes: [String: String] = [
-        "tiny": "~75 MB", "base": "~145 MB", "small": "~490 MB",
-        "medium": "~1.5 GB", "large": "~3 GB",
-    ]
+    private var filterBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search models…", text: $search).textFieldStyle(.plain)
+                Divider().frame(height: 16)
+                Picker("", selection: $languageFilter) {
+                    ForEach(LanguageFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
-    private func modelHint(for repoID: String) -> String {
-        let lang = repoID.hasSuffix(".en") ? "English only" : "Multilingual"
-        let variant = repoID.components(separatedBy: "_whisper-").last?
-            .replacingOccurrences(of: ".en", with: "")
-            .components(separatedBy: "-").first ?? ""
-        let size = Self.modelSizes[variant].map { " · \($0)" } ?? ""
-        return lang + size
+            Divider()
+
+            HStack(spacing: 12) {
+                Text("Size").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: $sizeFilter) {
+                    Text("Any").tag(Optional<ModelSizeCategory>.none)
+                    ForEach(ModelSizeCategory.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+
+                Divider().frame(height: 16)
+
+                Text("Speed").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: $speedFilter) {
+                    Text("Any").tag(Optional<ModelSpeed>.none)
+                    ForEach(ModelSpeed.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
     }
 
-    private func curatedModelRow(repoID: String) -> some View {
-        let shortName = repoID.components(separatedBy: "_whisper-").last ?? repoID
-        let isActive = activeModel == repoID
-        let isDownloaded = modelManager.downloadedModels.contains { $0 == repoID }
-        let progress = modelManager.downloadProgress[repoID]
+    private func filtered(_ models: [WhisperModelInfo]) -> [WhisperModelInfo] {
+        models.filter { m in
+            let matchSearch = search.isEmpty || m.displayName.localizedCaseInsensitiveContains(search)
+            let matchLang: Bool = switch languageFilter {
+                case .all: true
+                case .multilingual: m.multilingual
+                case .english: !m.multilingual
+            }
+            let matchSize = sizeFilter == nil || m.sizeCategory == sizeFilter
+            let matchSpeed = speedFilter == nil || m.speed == speedFilter
+            return matchSearch && matchLang && matchSize && matchSpeed
+        }
+    }
+
+    private func modelRow(_ model: WhisperModelInfo) -> some View {
+        let isActive = activeModel == model.repoID
+        let isDownloaded = modelManager.downloadedModels.contains(model.repoID)
+        let progress = modelManager.downloadProgress[model.repoID]
 
         return HStack {
             Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .onTapGesture { settings.modelSource = "hf:\(repoID)" }
+                .onTapGesture { settings.modelSource = "hf:\(model.repoID)" }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(shortName.capitalized)
-                Text(modelHint(for: repoID))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.displayName)
+                Text(model.hint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    MetricDots(label: "Speed",    score: model.speedScore)
+                    MetricDots(label: "Accuracy", score: model.accuracyScore)
+                }
             }
             Spacer()
 
             if let p = progress {
-                ProgressView(value: p)
-                    .frame(width: 80)
-                    .progressViewStyle(.linear)
+                ProgressView(value: p).frame(width: 80).progressViewStyle(.linear)
             } else if isDownloaded {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Button(role: .destructive) {
+                        modelManager.delete(repoID: model.repoID)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                }
             } else {
                 Button("Download") {
-                    Task { try? await modelManager.download(repoID: repoID) }
+                    Task { try? await modelManager.download(repoID: model.repoID) }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
