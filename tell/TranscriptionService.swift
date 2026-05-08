@@ -33,7 +33,8 @@ final class TranscriptionService {
         guard let kit else { throw TranscriptionError.notReady }
         state = .transcribing
         defer { state = .ready }
-        let results = try await kit.transcribe(audioPath: url.path)
+        let options = DecodingOptions(task: .transcribe)
+        let results = try await kit.transcribe(audioPath: url.path, decodeOptions: options)
         let raw = results.map(\.text).joined(separator: " ")
         let text = raw
             .replacingOccurrences(of: "[BLANK_AUDIO]", with: "")

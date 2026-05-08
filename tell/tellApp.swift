@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
         setupHotkey()
         preloadModel()
+        observeHotkeySettings()
+        observeModelSource()
         Task { @MainActor in checkAccessibility() }
     }
 
@@ -58,6 +60,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyCode: settings.hotkeyKeyCode,
             modifiers: settings.hotkeyModifiers
         )
+    }
+
+    private func observeHotkeySettings() {
+        withObservationTracking {
+            _ = settings.hotkeyKeyCode
+            _ = settings.hotkeyModifiers
+        } onChange: { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.hotkeyManager.start(
+                    keyCode: self.settings.hotkeyKeyCode,
+                    modifiers: self.settings.hotkeyModifiers
+                )
+                self.observeHotkeySettings()
+            }
+        }
+    }
+
+    private func observeModelSource() {
+        withObservationTracking {
+            _ = settings.modelSource
+        } onChange: { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.preloadModel()
+                self.observeModelSource()
+            }
+        }
     }
 
     private func preloadModel() {
