@@ -1,32 +1,87 @@
-//
-//  tellApp.swift
-//  tell
-//
-//  Created by Jannes Münse on 06.05.26.
-//
-
+import AppKit
+import AVFoundation
 import SwiftUI
-import SwiftData
 
 @main
 struct tellApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        WindowGroup(id: "settings") {
+            SettingsView(settings: appDelegate.settings)
         }
-        .modelContainer(sharedModelContainer)
+        .windowResizability(.contentSize)
+
+        MenuBarExtra("tell", systemImage: "mic") {
+            MenuBarView(
+                settings: appDelegate.settings,
+                transcription: appDelegate.transcription
+            )
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let settings = AppSettings()
+    let transcription = TranscriptionService()
+    private let hotkeyManager = HotkeyManager()
+    private let recorder = AudioRecorder()
+    private let pasteService = PasteService()
+    private let overlay = RecordingOverlayPanel()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        setupHotkey()
+        preloadModel()
+        Task { @MainActor in checkAccessibility() }
+    }
+
+    private func setupHotkey() {
+        hotkeyManager.onKeyDown = { [weak self] in
+            guard let self else { return }
+            overlay.show()
+            recorder.start()
+        }
+        hotkeyManager.onKeyUp = { [weak self] in
+            guard let self else { return }
+            Task {
+                let url = await self.recorder.stop()
+                do {
+                    let text = try await self.transcription.transcribe(url: url)
+                    self.pasteService.paste(text: text)
+                } catch {}
+                self.overlay.hide()
+            }
+        }
+        hotkeyManager.start(
+            keyCode: settings.hotkeyKeyCode,
+            modifiers: settings.hotkeyModifiers
+        )
+    }
+
+    private func preloadModel() {
+        let src = settings.modelSource
+        let source: ModelSource
+        if src.hasPrefix("hf:") {
+            source = .huggingFace(String(src.dropFirst(3)))
+        } else if src.hasPrefix("local:") {
+            source = .localFile(URL(fileURLWithPath: String(src.dropFirst(6))))
+        } else {
+            source = .huggingFace(src)
+        }
+        Task { await transcription.preload(source: source) }
+    }
+
+    private func checkAccessibility() {
+        guard !AXIsProcessTrusted() else { return }
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Access Required"
+        alert.informativeText = "tell needs Accessibility access to detect the hotkey and paste text. Grant access in System Settings → Privacy & Security → Accessibility."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        }
     }
 }

@@ -1,0 +1,31 @@
+# Xcode
+xcuserdata/
+*.xccheckout
+*.xcuserstate
+*.hmap
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+## App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+# Package.resolved is intentionally committed for reproducible builds
+
+# CocoaPods
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Claude
+.claude/
+PLAN.md
